@@ -50,6 +50,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.io.IOException;
 
 public class RestProtocol extends AbstractProxyProtocol {
 
@@ -87,7 +89,7 @@ public class RestProtocol extends AbstractProxyProtocol {
     @Override
     protected <T> Runnable doExport(T impl, Class<T> type, URL url) throws RpcException {
         String addr = getAddr(url);
-        Class implClass = ApplicationModel.getProviderModel(url.getServiceKey()).getServiceInstance().getClass();
+        Class implClass = ApplicationModel.getProviderModel(url.getPathKey()).getServiceInstance().getClass();
         RestServer server = servers.computeIfAbsent(addr, restServer -> {
             RestServer s = serverFactory.createServer(url.getParameter(Constants.SERVER_KEY, DEFAULT_SERVER));
             s.start(url);
@@ -133,8 +135,8 @@ public class RestProtocol extends AbstractProxyProtocol {
         // TODO more configs to add
         PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
         // 20 is the default maxTotal of current PoolingClientConnectionManager
-        connectionManager.setMaxTotal(url.getParameter(Constants.CONNECTIONS_KEY, HTTPCLIENTCONNECTIONMANAGER_MAXTOTAL));
-        connectionManager.setDefaultMaxPerRoute(url.getParameter(Constants.CONNECTIONS_KEY, HTTPCLIENTCONNECTIONMANAGER_MAXPERROUTE));
+        connectionManager.setMaxTotal(url.getParameter(Constants.CONNECTIONS_KEY, 20));
+        connectionManager.setDefaultMaxPerRoute(url.getParameter(Constants.CONNECTIONS_KEY, 20));
 
         if (connectionMonitor == null) {
             connectionMonitor = new ConnectionMonitor();
@@ -162,7 +164,7 @@ public class RestProtocol extends AbstractProxyProtocol {
                             return Long.parseLong(value) * 1000;
                         }
                     }
-                    return HTTPCLIENT_KEEPALIVEDURATION;
+                    return 30000;
                 })
                 .setDefaultRequestConfig(requestConfig)
                 .setDefaultSocketConfig(socketConfig)
@@ -230,6 +232,12 @@ public class RestProtocol extends AbstractProxyProtocol {
 
     protected String getContextPath(URL url) {
         String contextPath = url.getPath();
+        if (contextPath.equalsIgnoreCase(url.getParameter(Constants.INTERFACE_KEY))) {
+            return "";
+        }
+        if (contextPath.endsWith(url.getParameter(Constants.INTERFACE_KEY))) {
+            contextPath = contextPath.substring(0, contextPath.lastIndexOf(url.getParameter(Constants.INTERFACE_KEY)));
+        }
         return contextPath.endsWith("/") ? contextPath.substring(0, contextPath.length() - 1) : contextPath;
     }
 
@@ -246,10 +254,10 @@ public class RestProtocol extends AbstractProxyProtocol {
             try {
                 while (!shutdown) {
                     synchronized (this) {
-                        wait(HTTPCLIENTCONNECTIONMANAGER_CLOSEWAITTIME_MS);
+                        wait(1000);
                         for (PoolingHttpClientConnectionManager connectionManager : connectionManagers) {
                             connectionManager.closeExpiredConnections();
-                            connectionManager.closeIdleConnections(HTTPCLIENTCONNECTIONMANAGER_CLOSEIDLETIME_S, TimeUnit.SECONDS);
+                            connectionManager.closeIdleConnections(30, TimeUnit.SECONDS);
                         }
                     }
                 }
